@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/temperature", tags=["温控监控"])
 
 service = TemperatureService()
 
-LIST_FIELDS = ["记录编号", "关联运单", "测点编号", "实时温度", "温度上限", "温度下限", "采集时间"]
+LIST_FIELDS = ["记录编号", "关联运单", "测点编号", "实时温度", "温度上限", "温度下限", "采集时间", "运单状态"]
 STATUSES = ["正常", "偏高", "偏低", "已离线"]
 
 

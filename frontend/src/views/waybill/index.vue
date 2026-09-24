@@ -38,15 +38,19 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
-              class="link"
-              type="button"
-              @click="runAction(action, row)"
-            >
-              {{ action }}
-            </button>
+            <template v-if="actionsFor(row).length">
+              <button
+                v-for="action in actionsFor(row)"
+                :key="action"
+                class="link"
+                type="button"
+                :disabled="busyId === String(row.id)"
+                @click="runAction(action, row)"
+              >
+                {{ action }}
+              </button>
+            </template>
+            <span v-else class="action-muted">已结束流转</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -68,11 +72,22 @@ import { onMounted, ref } from 'vue'
 import { request } from '@/api/client'
 
 type Row = Record<string, string | number | null>
+interface ActionResponse {
+  ok: boolean
+  message: string
+}
 
 const ENDPOINT = '/api/waybill'
 const columns = ["运单号", "关联订单", "承运车辆", "司机姓名", "装车时间", "卸货时间", "运单状态"]
-const actions = ["确认装车", "签收运单", "作废运单"]
-const statuses = ["待装车", "运输中", "已签收", "已作废"]
+
+// 状态流转约束（与后端一致）：待装车可确认装车/作废；运输中可签收/作废；终态不再给入口
+const ACTIONS_BY_STATUS: Record<string, string[]> = {
+  "待装车": ["确认装车", "作废运单"],
+  "运输中": ["签收运单", "作废运单"],
+  "已签收": [],
+  "已作废": [],
+}
+
 const stats = [{"label": "在途运单", "value": 0}, {"label": "待签收运单", "value": 0}, {"label": "异常运单", "value": 0}]
 
 const rows = ref<Row[]>([])
@@ -80,6 +95,15 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const busyId = ref('')
+
+function statusOf(row: Row): string {
+  return String(row["运单状态"] ?? row.status ?? "")
+}
+
+function actionsFor(row: Row): string[] {
+  return ACTIONS_BY_STATUS[statusOf(row)] ?? []
+}
 
 function resetFilters() {
   filters.value = {}
@@ -95,18 +119,30 @@ function openCreate() {
 }
 
 async function runAction(action: string, row: Row) {
+  // 请求未返回前禁用该行入口，连续点两次签收时第二次不会再发请求
+  const rowId = String(row.id)
+  if (busyId.value === rowId) return
   errorMessage.value = ''
+  busyId.value = rowId
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
     if (!response.ok) {
       throw new Error('运单管理动作未生效，请稍后重试')
     }
+    const result = (await response.json()) as ActionResponse
+    if (!result.ok) {
+      // 被后端流转规则拦下：直接展示后端给出的原因，不推进本地状态
+      errorMessage.value = result.message
+      return
+    }
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '运单管理操作失败'
+  } finally {
+    busyId.value = ''
   }
 }
 
@@ -128,3 +164,20 @@ async function reload() {
 
 onMounted(reload)
 </script>
+
+<style scoped>
+.action-muted {
+  color: var(--muted, #64748b);
+  font-size: 12px;
+}
+
+.link:disabled {
+  color: var(--muted, #64748b);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.row-actions .link + .link {
+  margin-left: 12px;
+}
+</style>

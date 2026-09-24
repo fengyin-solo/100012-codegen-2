@@ -70,7 +70,7 @@ import { request } from '@/api/client'
 type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/temperature'
-const columns = ["记录编号", "关联运单", "测点编号", "实时温度", "温度上限", "温度下限", "采集时间"]
+const columns = ["记录编号", "关联运单", "测点编号", "实时温度", "温度上限", "温度下限", "采集时间", "运单状态"]
 const actions = ["确认记录", "标记超限", "重新采集"]
 const statuses = ["正常", "偏高", "偏低", "已离线"]
 const stats = [{"label": "今日采集测点", "value": 0}, {"label": "超限测点", "value": 0}, {"label": "离线测点", "value": 0}]
