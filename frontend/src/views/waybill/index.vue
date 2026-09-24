@@ -39,14 +39,16 @@
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in actionsFor(row)"
               :key="action"
               class="link"
               type="button"
+              :disabled="acting"
               @click="runAction(action, row)"
             >
               {{ action }}
             </button>
+            <span v-if="!actionsFor(row).length" class="muted-text">已办结，不可再变更</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -57,6 +59,7 @@
 
     <footer class="page-foot">
       <span>共 {{ total }} 条运单管理记录</span>
+      <span v-if="noticeMessage" class="notice-text">{{ noticeMessage }}</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -71,15 +74,27 @@ type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/waybill'
 const columns = ["运单号", "关联订单", "承运车辆", "司机姓名", "装车时间", "卸货时间", "运单状态"]
-const actions = ["确认装车", "签收运单", "作废运单"]
 const statuses = ["待装车", "运输中", "已签收", "已作废"]
+// 每个状态只允许推进到下一个环节：待装车可装车/作废，运输中可签收/作废，签收或作废后办结
+const ACTIONS_BY_STATUS: Record<string, string[]> = {
+  待装车: ["确认装车", "作废运单"],
+  运输中: ["签收运单", "作废运单"],
+  已签收: [],
+  已作废: [],
+}
 const stats = [{"label": "在途运单", "value": 0}, {"label": "待签收运单", "value": 0}, {"label": "异常运单", "value": 0}]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const noticeMessage = ref('')
+const acting = ref(false)
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+function actionsFor(row: Row): string[] {
+  return ACTIONS_BY_STATUS[String(row.status ?? row['运单状态'] ?? '')] ?? []
+}
 
 function resetFilters() {
   filters.value = {}
@@ -95,23 +110,33 @@ function openCreate() {
 }
 
 async function runAction(action: string, row: Row) {
+  if (acting.value) {
+    return
+  }
+  acting.value = true
   errorMessage.value = ''
+  noticeMessage.value = ''
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
       body: JSON.stringify({ action }),
     })
-    if (!response.ok) {
-      throw new Error('运单管理动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.message || '运单管理动作未生效，请稍后重试')
     }
     await reload()
+    noticeMessage.value = payload.message || `冷链运单已${action}`
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '运单管理操作失败'
+  } finally {
+    acting.value = false
   }
 }
 
 async function reload() {
   errorMessage.value = ''
+  noticeMessage.value = ''
   const query = new URLSearchParams(filters.value as Record<string, string>).toString()
   try {
     const response = await request(`${ENDPOINT}?${query}`)
